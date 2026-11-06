@@ -1,0 +1,6 @@
+interface:
+  display_name: "Flight Price PDF"
+  short_description: "Live flight comparison with compact PDF summaries"
+  default_prompt: "Use $flight-price to compare flights and create a compact PDF summary."
+policy:
+  allow_implicit_invocation: true
