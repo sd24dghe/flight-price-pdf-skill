@@ -1,0 +1,118 @@
+# flight-price-pdf-skill
+
+[中文](README.md) | [English](README.en.md)
+
+A local Codex skill for querying live Trip.com flight prices for any origin and destination, then generating a PDF automatically. It supports one-way and round-trip searches, trip days or nights, and low-token output.
+
+## Features
+
+- Uses the `flight-price` CLI with headless Chromium through Playwright
+- Generates PDF by default; XLSX and DOCX are optional
+- Keeps raw JSON on disk and prints only a compact summary
+- Accepts any origin/destination, one-way/round-trip, date range, airline, and stop filters
+- Maps "8 days" to 7 nights and keeps "8 nights" as 8 nights
+- Never guesses baggage, aircraft, refund, or ticketing fields
+- Adds comparison columns for price basis, baggage, stops, refund/change, ticketing provider, and aircraft
+- Highlights a direct-flight alternative when the cheapest itinerary is not direct
+- Retries a failed query once and writes short diagnostics with screenshots
+
+## Structure
+
+```text
+flight-price/
+├── SKILL.md
+├── agents/openai.yaml
+├── references/
+│   ├── schema.md
+│   └── request-mapping.md
+├── assets/sample-report.pdf
+└── scripts/
+    ├── run_flight_query.py
+    ├── flight_report.py
+    └── diagnose_trip.py
+examples/
+├── HKG-MXP-sample.json
+└── HKG-MXP-sample.pdf
+tests/test_report.py
+```
+
+## Install
+
+Download the ZIP from a Release, then extract it into the Codex skills directory:
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+unzip flight-price-pdf-skill.zip -d "${CODEX_HOME:-$HOME/.codex}/skills"
+```
+
+Or clone the repository and run:
+
+```bash
+./install.sh
+```
+
+## Usage
+
+Start a new Codex conversation and say:
+
+```text
+Use $flight-price to search HKG to MXP in June 2027, 8 days, round trip, and generate a PDF.
+Use $flight-price to search SZX to NRT on 2027-04-03, one way, and generate a PDF.
+```
+
+Run the entry point directly:
+
+```bash
+python3 "$HOME/.codex/skills/flight-price/scripts/run_flight_query.py" HKG MXP \
+  --trip-type roundtrip --days 8 \
+  --depart 2027-06-01 --to 2027-06-30 \
+  --formats pdf \
+  --output "./ORIGIN-DEST-2027-06.pdf" \
+  --title "Flight summary"
+```
+
+One-way example:
+
+```bash
+python3 "$HOME/.codex/skills/flight-price/scripts/run_flight_query.py" SZX NRT \
+  --trip-type oneway \
+  --depart 2027-04-03 --to 2027-04-03 \
+  --output "./SZX-NRT-2027-04.pdf"
+```
+
+Request Word or Excel with:
+
+```bash
+--formats pdf,xlsx,docx
+```
+
+Diagnostics are written to `./flight-diagnostics` on a final failure:
+
+```bash
+python3 "$HOME/.codex/skills/flight-price/scripts/run_flight_query.py" HKG MXP \
+  --trip-type roundtrip --stay 8 \
+  --depart 2027-06-10 --to 2027-07-01 \
+  --diagnostics-dir "./flight-diagnostics"
+```
+
+Examples:
+
+- [Sample JSON](examples/HKG-MXP-sample.json)
+- [Sample PDF](examples/HKG-MXP-sample.pdf)
+
+## Dependencies
+
+- `flight-price` CLI
+- Python 3.11+
+- `reportlab`
+- `python-docx`
+- `openpyxl`
+- `pypdf` (tests only)
+
+In Codex desktop, use the Python executable from the workspace dependencies.
+
+## Test
+
+```bash
+python3 tests/test_report.py -v
+```

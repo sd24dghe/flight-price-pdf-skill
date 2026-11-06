@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from flight_report import (
@@ -24,16 +24,40 @@ from flight_report import (
 )
 
 
+def normalize_trip_type(value: str) -> str:
+    normalized = value.strip().lower().replace("-", "").replace("_", "")
+    aliases = {
+        "oneway": "oneway",
+        "ow": "oneway",
+        "single": "oneway",
+        "单程": "oneway",
+        "roundtrip": "roundtrip",
+        "round": "roundtrip",
+        "rt": "roundtrip",
+        "return": "roundtrip",
+        "往返": "roundtrip",
+    }
+    if normalized not in aliases:
+        raise argparse.ArgumentTypeError("trip type must be oneway or roundtrip")
+    return aliases[normalized]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("origin")
     parser.add_argument("dest")
-    parser.add_argument("--from", dest="date_from", help="outbound start date YYYY-MM-DD")
+    parser.add_argument("--depart", "--from", dest="date_from", help="outbound start date YYYY-MM-DD")
     parser.add_argument("--to", dest="date_to", help="outbound end date YYYY-MM-DD")
     parser.add_argument("--pairs", help="explicit OUT[:RET] pairs")
+    parser.add_argument(
+        "--trip-type",
+        type=normalize_trip_type,
+        help="oneway/单程 or roundtrip/往返",
+    )
     parser.add_argument("--rt", action="store_true", help="round-trip mode")
-    parser.add_argument("--stay", type=int, help="round-trip stay nights")
-    parser.add_argument("--return-date", help="fixed return date YYYY-MM-DD")
+    parser.add_argument("--stay", "--nights", dest="stay", type=int, help="round-trip stay nights")
+    parser.add_argument("--days", type=int, help="inclusive trip days; 8 days becomes 7 nights")
+    parser.add_argument("--return-date", "--return", dest="return_date", help="fixed return date YYYY-MM-DD")
     parser.add_argument("--direct", action="store_true")
     parser.add_argument("--max-stops", type=int)
     parser.add_argument("--airline")
@@ -59,13 +83,53 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def effective_stay(args: argparse.Namespace) -> int | None:
+    if args.stay is not None and args.days is not None:
+        raise ValueError("use either --stay/--nights or --days, not both")
+    stay = args.stay
+    if args.days is not None:
+        if args.days < 1:
+            raise ValueError("--days must be at least 1")
+        stay = args.days - 1
+    if stay is not None and stay < 0:
+        raise ValueError("stay nights cannot be negative")
+    return stay
+
+
+def effective_trip_type(args: argparse.Namespace) -> str:
+    if args.pairs:
+        return "pairs"
+    if args.trip_type:
+        return args.trip_type
+    if args.rt or args.stay is not None or args.days is not None or args.return_date:
+        return "roundtrip"
+    return "oneway"
+
+
 def build_command(args: argparse.Namespace, executable: str) -> list[str]:
-    if args.pairs and (args.date_from or args.date_to or args.rt or args.stay or args.return_date):
-        raise ValueError("--pairs cannot be combined with --from/--to/--rt/--stay/--return-date")
-    if args.pairs and (not args.date_from and not args.date_to):
-        pass
-    elif not args.date_from:
+    if args.pairs and (
+        args.date_from
+        or args.date_to
+        or args.rt
+        or args.trip_type
+        or args.stay is not None
+        or args.days is not None
+        or args.return_date
+    ):
+        raise ValueError(
+            "--pairs cannot be combined with dates, trip type, stay, days, or return date"
+        )
+    if not args.pairs and not args.date_from:
         raise ValueError("--from is required unless --pairs is used")
+    if args.rt and args.trip_type == "oneway":
+        raise ValueError("--rt conflicts with --trip-type oneway")
+
+    trip_type = effective_trip_type(args)
+    stay = effective_stay(args)
+    if trip_type == "oneway" and (stay is not None or args.return_date):
+        raise ValueError("one-way trips cannot use stay/nights/days or a return date")
+    if trip_type == "roundtrip" and stay is None and not args.return_date:
+        raise ValueError("round-trip queries require --stay/--nights, --days, or --return-date")
 
     command = [executable, args.origin.upper(), args.dest.upper()]
     if args.pairs:
@@ -74,10 +138,10 @@ def build_command(args: argparse.Namespace, executable: str) -> list[str]:
         command += ["--from", args.date_from]
         if args.date_to:
             command += ["--to", args.date_to]
-        if args.stay is not None or args.return_date:
+        if trip_type == "roundtrip":
             command += ["--rt"]
-        if args.stay is not None:
-            command += ["--stay", str(args.stay)]
+        if stay is not None:
+            command += ["--stay", str(stay)]
         if args.return_date:
             command += ["--return-date", args.return_date]
 
@@ -147,7 +211,14 @@ def diagnostic_dates(args: argparse.Namespace) -> tuple[str, str | None]:
     if args.pairs:
         first_pair = args.pairs.split(",")[0].split(":")
         return first_pair[0], first_pair[1] if len(first_pair) > 1 else None
-    return args.date_from, args.return_date
+    return_date = args.return_date
+    if return_date is None and args.date_from:
+        stay = effective_stay(args)
+        if stay is not None:
+            return_date = (
+                datetime.fromisoformat(args.date_from).date() + timedelta(days=stay)
+            ).isoformat()
+    return args.date_from, return_date
 
 
 def playwright_python(executable: str) -> str:

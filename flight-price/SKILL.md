@@ -1,6 +1,6 @@
 ---
 name: flight-price
-description: Query and summarize bookable Trip.com flight prices with the `flight-price` CLI. Use when the user asks to find cheap flights, compare dates or airports, scan a holiday or multi-city itinerary, identify baggage-inclusive fares, list operating aircraft types when available, or export flight results to PDF, DOCX, or XLSX. Trigger phrases include 查机票, 比价, 往返 8 晚, 生成机票 PDF, 找便宜机票, 多日期机票, 含托运行李机票, 导出 Excel 机票, 输出 Word 机票. Supports comparisons, baggage checks, aircraft details, and PDF/Word/Excel summaries.
+description: Query and summarize bookable Trip.com flight prices for any origin and destination with the `flight-price` CLI. Use when the user provides an origin, destination, travel month/date range, trip days or nights, and one-way or round-trip intent, or asks to compare dates or airports, identify baggage-inclusive fares, list operating aircraft types when available, or export flight results to PDF, DOCX, or XLSX. Trigger phrases include 查机票, 比价, 单程机票, 往返机票, 往返 8 晚, 玩 8 天, 生成机票 PDF, 找便宜机票, 多日期机票, 含托运行李机票, 导出 Excel 机票, 输出 Word 机票.
 ---
 
 # flight-price
@@ -13,12 +13,40 @@ Invoke this skill for requests such as:
 
 - `查机票`
 - `比价`
+- `单程机票`
+- `往返机票`
 - `往返 8 晚`
+- `玩 8 天`
 - `生成机票 PDF`
 - `找便宜机票`
 - `比较多日期机票`
 - `含托运行李机票`
 - `导出机票 Excel`
+
+## Natural-language request mapping
+
+Accept any origin and destination, not just HKG-MXP. Extract these fields before querying:
+
+| User input | Query mapping |
+|---|---|
+| `香港到米兰` / `HKG to MXP` | `origin=HKG`, `dest=MXP` |
+| `单程` / `one-way` | `--trip-type oneway` |
+| `往返` / `round trip` | `--trip-type roundtrip` |
+| `玩 8 天` | `--days 8` (inclusive days, becomes 7 nights) |
+| `住 8 晚` / `8 nights` | `--stay 8` |
+| `6 月` | scan 06-01 through 06-30 unless specific dates are given |
+| `10 月 3 日出发` | fixed `--depart 10-03` and `--to` same date |
+
+Inference rules:
+
+- Mentions of return dates, stay nights, or trip days imply round-trip.
+- A request with only an outbound date and no return information implies one-way.
+- Convert `玩 N 天` to `N-1` nights; keep `N 晚` unchanged.
+- If origin or destination is missing, ask one short clarification.
+- If the month is ambiguous relative to today, ask for the year.
+- State any inferred assumption in the final answer.
+
+Detailed mapping examples are in [references/request-mapping.md](references/request-mapping.md).
 
 ## Query architecture
 
@@ -30,12 +58,21 @@ Use `scripts/run_flight_query.py` for a complete flight request. It invokes `fli
 
 ```bash
 SKILL_DIR="${CODEX_HOME:-$HOME/.codex}/skills/flight-price"
-python3 "$SKILL_DIR/scripts/run_flight_query.py" HKG MXP \
-  --rt --stay 8 --from 2027-06-10 --to 2027-07-01 \
+python3 "$SKILL_DIR/scripts/run_flight_query.py" ORIGIN DEST \
+  --trip-type roundtrip --days 8 \
+  --depart 2027-06-01 --to 2027-06-30 \
   --formats pdf \
-  --output "/path/to/HKG-MXP-2027-06.pdf" \
+  --output "/path/to/ORIGIN-DEST-2027-06.pdf" \
   --top 10 \
-  --title "HKG-MXP 机票汇总"
+  --title "机票汇总"
+```
+
+For one-way:
+
+```bash
+python3 "$SKILL_DIR/scripts/run_flight_query.py" SZX NRT \
+  --trip-type oneway --depart 2027-04-03 --to 2027-04-03 \
+  --formats pdf --output "/path/to/SZX-NRT-2027-04.pdf"
 ```
 
 Add `--formats pdf,xlsx,docx` only when those formats are requested. Add `--cache` for a repeat scan; omit it for a final booking check. Pass `--keep-json` only when the user asks for the source data.
