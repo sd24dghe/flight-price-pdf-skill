@@ -1,0 +1,95 @@
+{
+  "origin": "HKG",
+  "dest": "MXP",
+  "mode": "RT",
+  "currency": "CNY",
+  "adults": 1,
+  "results": [
+    {
+      "date": "2027-06-14",
+      "return_date": "2027-06-22",
+      "stay_nights": 8,
+      "status": "ok",
+      "options": [
+        {
+          "price": 4690,
+          "currency": "CNY",
+          "price_basis": "含税总价",
+          "airline": "QR",
+          "flight_nos": ["QR817", "QR123"],
+          "segments": [
+            {
+              "depart_airport": "HKG",
+              "arrive_airport": "DOH",
+              "craftInfo": {"name": "Boeing 777-300ER"}
+            },
+            {
+              "depart_airport": "DOH",
+              "arrive_airport": "MXP",
+              "craftInfo": {"name": "Airbus A350-900"}
+            }
+          ],
+          "return_flights": [{"flight_no": "QR118"}, {"flight_no": "QR816"}],
+          "baggage": "含 1 件托运行李",
+          "refund_change": "改签收费，退票见票规",
+          "provider": "Trip.com（出票方见详情）",
+          "depart_time": "2027-06-14 19:40:00",
+          "total_duration_min": 1050
+        },
+        {
+          "price": 4973,
+          "currency": "CNY",
+          "price_basis": "含税总价",
+          "airline": "AY",
+          "flight_nos": ["AY100", "AY1751"],
+          "segments": [
+            {"depart_airport": "HKG", "arrive_airport": "HEL"},
+            {"depart_airport": "HEL", "arrive_airport": "MXP"}
+          ],
+          "return_flights": [{"flight_no": "AY1752"}],
+          "baggage": "含 1 件托运行李",
+          "refund_change": "不可退，改签收费",
+          "provider": "Trip.com（出票方见详情）",
+          "depart_time": "2027-06-14 20:55:00",
+          "total_duration_min": 760
+        },
+        {
+          "price": 4850,
+          "currency": "CNY",
+          "price_basis": "含税总价",
+          "airline": "CX",
+          "flight_nos": ["CX233"],
+          "segments": [
+            {
+              "depart_airport": "HKG",
+              "arrive_airport": "MXP",
+              "craftInfo": {"name": "Airbus A350-900"}
+            }
+          ],
+          "return_flights": [{"flight_no": "CX234"}],
+          "baggage": "含 1 件托运行李",
+          "refund_change": "退改规则见出票页",
+          "provider": "Trip.com（出票方见详情）",
+          "depart_time": "2027-06-14 01:05:00",
+          "total_duration_min": 430
+        },
+        {
+          "price": 4160,
+          "currency": "CNY",
+          "price_basis": "含税总价",
+          "airline": "EY",
+          "flight_nos": ["EY871", "EY081"],
+          "segments": [
+            {"depart_airport": "HKG", "arrive_airport": "AUH"},
+            {"depart_airport": "AUH", "arrive_airport": "MXP"}
+          ],
+          "return_flights": [{"flight_no": "EY082"}, {"flight_no": "EY870"}],
+          "refund_change": "见出票页",
+          "provider": "Trip.com（出票方见详情）",
+          "depart_time": "2027-06-14 20:10:00",
+          "total_duration_min": 635
+        }
+      ]
+    }
+  ]
+}

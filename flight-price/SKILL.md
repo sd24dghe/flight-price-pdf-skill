@@ -1,11 +1,28 @@
 ---
 name: flight-price
-description: Query and summarize bookable Trip.com flight prices with the `flight-price` CLI. Use when the user asks to find cheap flights, compare dates or airports, scan a holiday or multi-city itinerary, identify baggage-inclusive fares, list operating aircraft types when available, or export flight results to PDF, DOCX, or XLSX. Supports 查机票、比较机票价格、找便宜机票、扫描多日期或出发地、核对行李票档、整理机型，以及输出 PDF/Word/Excel 汇总。
+description: Query and summarize bookable Trip.com flight prices with the `flight-price` CLI. Use when the user asks to find cheap flights, compare dates or airports, scan a holiday or multi-city itinerary, identify baggage-inclusive fares, list operating aircraft types when available, or export flight results to PDF, DOCX, or XLSX. Trigger phrases include 查机票, 比价, 往返 8 晚, 生成机票 PDF, 找便宜机票, 多日期机票, 含托运行李机票, 导出 Excel 机票, 输出 Word 机票. Supports comparisons, baggage checks, aircraft details, and PDF/Word/Excel summaries.
 ---
 
 # flight-price
 
 A CLI tool that queries **Trip.com** for real, currently-bookable flight prices across a date range or a list of explicit (outbound, return) date pairs. Designed for AI agents. The default workflow is one atomic wrapper call that saves raw JSON locally, creates a PDF, and prints only a compact result summary.
+
+## Trigger phrases
+
+Invoke this skill for requests such as:
+
+- `查机票`
+- `比价`
+- `往返 8 晚`
+- `生成机票 PDF`
+- `找便宜机票`
+- `比较多日期机票`
+- `含托运行李机票`
+- `导出机票 Excel`
+
+## Query architecture
+
+`flight-price` extracts Trip.com's `FlightListSearch` response data. Do not replace it with DOM text scraping for normal queries. Use [diagnose_trip.py](scripts/diagnose_trip.py) only to investigate page/API failures. The diagnostic helper degrades through CSS selectors, text selectors, and regex markers, while saving a screenshot instead of dumping HTML.
 
 ## Fast path: query and PDF in one command
 
@@ -24,6 +41,10 @@ python3 "$SKILL_DIR/scripts/run_flight_query.py" HKG MXP \
 Add `--formats pdf,xlsx,docx` only when those formats are requested. Add `--cache` for a repeat scan; omit it for a final booking check. Pass `--keep-json` only when the user asks for the source data.
 
 Use `flight_report.py` only when a JSON result already exists. Never print the JSON before calling either script.
+
+The default PDF includes query time, currency, source URL, total-price basis, baggage, stops, refund/change status, ticketing provider, aircraft, and a direct-flight value hint. Fields without trustworthy data remain blank or say `见出票页`.
+
+See [references/schema.md](references/schema.md) for normalized report fields and source limitations. A sanitized example is available in [assets/sample-report.pdf](assets/sample-report.pdf).
 
 ## Mandatory low-token protocol
 
@@ -75,6 +96,19 @@ It checks (in order): python version, package install, playwright import, Chromi
 **Enable `--cache` when iterating.** Set `--cache` on the first multi-date call. Subsequent refinements using the same dates can reuse the cached raw response. Do not turn cache on for final booking checks.
 
 **Do NOT use `--cache` when** the user is about to book (they need THE current price), or when running a periodic monitor (every run should be fresh).
+
+### Retry and diagnostics
+
+`run_flight_query.py` retries a failed query once by default. It does not retry `no_results`.
+
+On a final failure, it writes short diagnostics without printing raw data:
+
+- `<diagnostics>/stderr.txt`
+- `<diagnostics>/doctor.json`
+- `<diagnostics>/diagnose-trip.json`
+- `<diagnostics>/trip-page-*.png`
+
+Pass `--diagnostics-dir` (or use the default `./flight-diagnostics`) and inspect only the short JSON summary. The diagnostic page uses headless Chromium, `viewport=1440x900`, `locale=en-US`, and `timezone=Asia/Hong_Kong`.
 
 ### Report formats
 

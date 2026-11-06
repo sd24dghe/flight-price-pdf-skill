@@ -4,9 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import json
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -48,7 +52,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top", type=int, default=10)
     parser.add_argument("--title")
     parser.add_argument("--source", default="Trip.com / flight-price")
+    parser.add_argument("--source-url", default="https://tw.trip.com/chinaflights/")
     parser.add_argument("--keep-json", help="optional path for the raw query JSON")
+    parser.add_argument("--retries", type=int, default=1, help="retry count after a failed query")
+    parser.add_argument("--diagnostics-dir", help="save failure screenshots and diagnostics here")
     return parser.parse_args()
 
 
@@ -136,10 +143,119 @@ def short_error(text: str, limit: int = 450) -> str:
     return clean[:limit]
 
 
+def diagnostic_dates(args: argparse.Namespace) -> tuple[str, str | None]:
+    if args.pairs:
+        first_pair = args.pairs.split(",")[0].split(":")
+        return first_pair[0], first_pair[1] if len(first_pair) > 1 else None
+    return args.date_from, args.return_date
+
+
+def playwright_python(executable: str) -> str:
+    try:
+        first_line = Path(executable).read_text(encoding="utf-8", errors="ignore").splitlines()[0]
+        if first_line.startswith("#!"):
+            candidate = first_line[2:].split()[0]
+            if Path(candidate).exists() and "python" in Path(candidate).name.lower():
+                return candidate
+    except Exception:
+        pass
+    return sys.executable
+
+
+def save_diagnostics(
+    args: argparse.Namespace,
+    executable: str,
+    command: list[str],
+    stderr: str,
+) -> Path:
+    diagnostics_dir = Path(args.diagnostics_dir or Path.cwd() / "flight-diagnostics").expanduser().resolve()
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
+    (diagnostics_dir / "command.txt").write_text(
+        " ".join(shlex.quote(part) for part in command) + "\n",
+        encoding="utf-8",
+    )
+    (diagnostics_dir / "stderr.txt").write_text(stderr[-4000:], encoding="utf-8")
+
+    try:
+        doctor = subprocess.run(
+            [executable, "doctor", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        doctor = None
+    doctor_text = (
+        (doctor.stdout or doctor.stderr)
+        if doctor is not None
+        else "doctor timed out"
+    )
+    (diagnostics_dir / "doctor.json").write_text(doctor_text, encoding="utf-8")
+
+    diagnostic_script = Path(__file__).with_name("diagnose_trip.py")
+    if diagnostic_script.exists():
+        diagnostic_python = playwright_python(executable)
+        probe = subprocess.run(
+            [diagnostic_python, "-c", "import playwright"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        if probe.returncode != 0:
+            (diagnostics_dir / "diagnose-trip.json").write_text(
+                json.dumps(
+                    {
+                        "error": "Playwright unavailable in diagnostic runtime",
+                        "detail": short_error(probe.stderr or probe.stdout, 300),
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            return diagnostics_dir
+        dep, ret = diagnostic_dates(args)
+        diagnostic_command = [
+            diagnostic_python,
+            str(diagnostic_script),
+            args.origin.upper(),
+            args.dest.upper(),
+            "--date",
+            dep,
+            "--outdir",
+            str(diagnostics_dir),
+        ]
+        if ret:
+            diagnostic_command += ["--return-date", ret]
+        try:
+            completed = subprocess.run(
+                diagnostic_command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=45,
+            )
+        except subprocess.TimeoutExpired:
+            completed = None
+        diagnostic_text = (
+            (completed.stdout or completed.stderr)
+            if completed is not None
+            else "diagnostic timed out"
+        )
+        (diagnostics_dir / "diagnose-trip.json").write_text(
+            diagnostic_text,
+            encoding="utf-8",
+        )
+    return diagnostics_dir
+
+
 def main() -> None:
     args = parse_args()
     if args.top < 1:
         raise ValueError("--top must be at least 1")
+    if not 0 <= args.retries <= 2:
+        raise ValueError("--retries must be between 0 and 2")
     formats = parse_formats(args.formats)
 
     executable = shutil.which("flight-price")
@@ -153,20 +269,36 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="flight-price-") as temp_dir:
         json_path = Path(temp_dir) / "result.json"
-        with json_path.open("w", encoding="utf-8") as output:
-            completed = subprocess.run(
-                command,
-                stdout=output,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False,
-            )
-        if completed.returncode != 0:
-            message = short_error(completed.stderr or "flight-price failed")
-            raise ValueError(message)
+        data = None
+        rows = None
+        last_error = ""
+        for attempt in range(args.retries + 1):
+            with json_path.open("w", encoding="utf-8") as output:
+                completed = subprocess.run(
+                    command,
+                    stdout=output,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=False,
+                )
+            if completed.returncode == 0:
+                try:
+                    data = load_input(json_path)
+                    rows = collect_candidates(data)
+                except Exception as exc:
+                    last_error = str(exc)
+                else:
+                    break
+            else:
+                last_error = completed.stderr or "flight-price failed"
+            if attempt < args.retries:
+                time.sleep(1)
 
-        data = load_input(json_path)
-        rows = collect_candidates(data)
+        if data is None or rows is None:
+            diagnostics_dir = save_diagnostics(args, executable, command, last_error)
+            raise ValueError(
+                f"flight-price failed after retry; diagnostics: {diagnostics_dir}"
+            )
         if not rows:
             raise ValueError("no priced itineraries found")
 
@@ -177,11 +309,11 @@ def main() -> None:
 
     title = args.title or f"{args.origin.upper()}-{args.dest.upper()} 机票汇总"
     if pdf:
-        write_pdf(pdf, rows, data, args.top, title, args.source)
+        write_pdf(pdf, rows, data, args.top, title, args.source, args.source_url)
     if xlsx:
-        write_xlsx(xlsx, rows, data, args.top, title, args.source)
+        write_xlsx(xlsx, rows, data, args.top, title, args.source, args.source_url)
     if docx:
-        write_docx(docx, rows, data, args.top, title, args.source)
+        write_docx(docx, rows, data, args.top, title, args.source, args.source_url)
 
     print(compact_summary(rows, pdf, xlsx, docx))
 

@@ -20,7 +20,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
@@ -38,15 +38,18 @@ COLUMNS = [
     ("stay_nights", "晚数"),
     ("price", "票价"),
     ("currency", "币种"),
+    ("price_basis", "总价口径"),
+    ("stops", "中转"),
+    ("baggage", "行李"),
+    ("refund_change", "退改规则"),
+    ("provider", "出票方"),
     ("airline", "航司"),
     ("outbound_flights", "去程航班"),
     ("outbound_route", "去程路线"),
     ("depart_time", "去程出发"),
     ("outbound_duration", "去程时长"),
-    ("stops", "中转"),
     ("return_flights", "返程航班"),
     ("aircraft", "机型"),
-    ("baggage", "行李"),
     ("notes", "备注"),
 ]
 
@@ -68,6 +71,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top", type=int, default=10, help="rows in the executive summary")
     parser.add_argument("--title", default="机票查询汇总", help="report title")
     parser.add_argument("--source", default="Trip.com / flight-price", help="data source label")
+    parser.add_argument(
+        "--source-url",
+        default="https://tw.trip.com/chinaflights/",
+        help="source URL shown in reports",
+    )
     return parser.parse_args()
 
 
@@ -122,6 +130,19 @@ def collect_candidates(data: dict[str, Any]) -> list[dict[str, Any]]:
             "checked_baggage",
             "free_checked_baggage",
         )
+        price_basis = first_value(item, "price_basis", "fare_basis") or "含税总价"
+        refund_change = first_value(
+            item,
+            "refund_change",
+            "refund_change_rule",
+            "change_rule",
+        ) or "见出票页"
+        provider = first_value(
+            item,
+            "ticketing_provider",
+            "provider",
+            "seller",
+        ) or "Trip.com（出票方见详情）"
         return_flights = item.get("return_flights") or []
         return_numbers = [
             str(entry.get("flight_no") or "")
@@ -141,6 +162,9 @@ def collect_candidates(data: dict[str, Any]) -> list[dict[str, Any]]:
             "stay_nights": item.get("stay_nights"),
             "price": price,
             "currency": item.get("currency") or data.get("currency") or "CNY",
+            "price_basis": price_basis,
+            "refund_change": refund_change,
+            "provider": provider,
             "airline": item.get("airline") or "",
             "outbound_flights": " / ".join(filter(None, outbound_flights)),
             "outbound_route": route,
@@ -275,6 +299,7 @@ def write_xlsx(
     top: int,
     title: str,
     source: str,
+    source_url: str,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     workbook = Workbook()
@@ -287,11 +312,12 @@ def write_xlsx(
         (summary, rows[:top], "Executive summary"),
         (all_results, rows, "All results"),
     ):
-        populate_sheet(sheet, sheet_rows, sheet_title, data, title, source)
+        populate_sheet(sheet, sheet_rows, sheet_title, data, title, source, source_url)
 
     meta_rows = [
         ("Title", title),
         ("Source", source),
+        ("Source URL", source_url),
         ("Generated", datetime.now().astimezone().isoformat(timespec="seconds")),
         ("Origin", data.get("origin") or ""),
         ("Destination", data.get("dest") or ""),
@@ -316,6 +342,7 @@ def populate_sheet(
     data: dict[str, Any],
     title: str,
     source: str,
+    source_url: str,
 ) -> None:
     sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLUMNS))
     heading = sheet.cell(row=1, column=1, value=title)
@@ -325,7 +352,7 @@ def populate_sheet(
 
     subtitle = (
         f"{sheet_title} | {data.get('origin') or ''} -> {data.get('dest') or ''} | "
-        f"{datetime.now().astimezone().strftime('%Y-%m-%d %H:%M')} | {source}"
+        f"{datetime.now().astimezone().strftime('%Y-%m-%d %H:%M')} | {source} | {source_url}"
     )
     sheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(COLUMNS))
     meta_cell = sheet.cell(row=2, column=1, value=subtitle)
@@ -353,7 +380,7 @@ def populate_sheet(
 
     sheet.freeze_panes = f"A{header_row + 1}"
     sheet.auto_filter.ref = f"A{header_row}:{get_column_letter(len(COLUMNS))}{header_row + max(len(rows), 1)}"
-    widths = [7, 10, 10, 13, 13, 8, 12, 8, 8, 22, 24, 18, 12, 8, 22, 24, 20, 20]
+    widths = [7, 10, 10, 13, 13, 8, 12, 8, 14, 10, 20, 28, 32, 8, 22, 24, 18, 12, 22, 24, 20]
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(index)].width = width
     sheet.sheet_view.showGridLines = False
@@ -392,6 +419,28 @@ def register_pdf_fonts() -> tuple[str, str]:
     return _PDF_FONTS
 
 
+def build_pdf_advice(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    best = rows[0]
+    if best["stops"] == 0:
+        return "最低价方案本身为直飞。"
+    direct = next((row for row in rows[1:] if row["stops"] == 0), None)
+    if direct is None:
+        return "当前候选未找到直飞方案，比较时优先看总旅行时间。"
+    price_delta = direct["price"] - best["price"]
+    price_ratio = price_delta / best["price"] if best["price"] else 0
+    if price_ratio <= 0.25:
+        return (
+            f"最低价方案为中转；第 {direct['rank']} 名是直飞，"
+            f"贵 {direct['currency']} {price_delta:,.0f}（{price_ratio:.0%}），值得一起比较。"
+        )
+    return (
+        f"最低价方案为中转；第 {direct['rank']} 名直飞，"
+        f"贵 {direct['currency']} {price_delta:,.0f}，预算优先时再选最低价。"
+    )
+
+
 def write_pdf(
     path: Path,
     rows: list[dict[str, Any]],
@@ -399,63 +448,68 @@ def write_pdf(
     top: int,
     title: str,
     source: str,
+    source_url: str,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     regular_font, bold_font = register_pdf_fonts()
     styles = getSampleStyleSheet()
+    page_size = landscape(A4)
     title_style = ParagraphStyle(
         "FlightTitle",
         parent=styles["Title"],
         fontName=bold_font,
-        fontSize=19,
-        leading=25,
+        fontSize=18,
+        leading=23,
         textColor=colors.HexColor("#17324D"),
         alignment=TA_CENTER,
-        spaceAfter=4 * mm,
+        spaceAfter=3 * mm,
     )
     subtitle_style = ParagraphStyle(
         "FlightSubtitle",
         parent=styles["Normal"],
         fontName=regular_font,
-        fontSize=8.8,
-        leading=13,
+        fontSize=8.2,
+        leading=12,
         textColor=colors.HexColor("#5B6B7A"),
         alignment=TA_CENTER,
-        spaceAfter=4 * mm,
+        spaceAfter=3 * mm,
     )
     body_style = ParagraphStyle(
         "FlightBody",
         parent=styles["BodyText"],
         fontName=regular_font,
-        fontSize=8.8,
-        leading=13.2,
+        fontSize=8.2,
+        leading=12,
         textColor=colors.HexColor("#273746"),
         alignment=TA_LEFT,
-        spaceAfter=1.6 * mm,
+        spaceAfter=1.4 * mm,
     )
     small_style = ParagraphStyle(
         "FlightSmall",
         parent=body_style,
-        fontSize=7.6,
-        leading=11.2,
+        fontSize=6.5,
+        leading=9.2,
         textColor=colors.HexColor("#5B6B7A"),
     )
     callout_style = ParagraphStyle(
         "FlightCallout",
         parent=body_style,
-        fontSize=9.6,
-        leading=14.8,
+        fontSize=9,
+        leading=13.5,
     )
 
     def paragraph(text: str, style: ParagraphStyle = body_style) -> Paragraph:
         return Paragraph(text, style)
 
+    generated = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    currency = data.get("currency") or "CNY"
     story = [
         paragraph(title, title_style),
         paragraph(
             f"{data.get('origin') or ''} -> {data.get('dest') or ''} | "
             f"{data.get('mode') or ''} | {data.get('adults') or 1} adult(s) | "
-            f"{datetime.now().astimezone().strftime('%Y-%m-%d %H:%M')} | {source}",
+            f"{currency} | 查询时间 {generated}<br/>"
+            f"数据来源：{source} | {source_url}",
             subtitle_style,
         ),
     ]
@@ -463,14 +517,21 @@ def write_pdf(
     top_rows = rows[:top]
     summary_lines = []
     for row in top_rows[:3]:
+        transfer_text = "直飞" if row["stops"] == 0 else f"中转 {row['stops']} 次"
         summary_lines.append(
             f"<b>{row['rank']}.</b> {row['currency']} {row['price']:,.0f} | "
-            f"{row['date']} -> {row['return_date'] or 'one-way'} | "
-            f"{row['airline']} {row['outbound_flights']}"
+            f"{row['date']} -> {row['return_date'] or '单程'} | "
+            f"{row['airline']} {row['outbound_flights']} | "
+            f"{transfer_text}"
         )
+    summary_lines.append(f"<b>比价提示：</b>{build_pdf_advice(rows)}")
+    summary_lines.append(
+        f"<b>价格口径：</b>{top_rows[0]['price_basis']}；"
+        "退改与出票方以出票页为准。"
+    )
     callout = Table(
         [[paragraph("<b>核心结果</b><br/>" + "<br/>".join(summary_lines), callout_style)]],
-        colWidths=[178 * mm],
+        colWidths=[263 * mm],
         hAlign="LEFT",
     )
     callout.setStyle(
@@ -480,45 +541,49 @@ def write_pdf(
                 ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#84B7AA")),
                 ("LEFTPADDING", (0, 0), (-1, -1), 9),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 9),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 7),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
             ]
         )
     )
-    story += [callout, Spacer(1, 4 * mm)]
+    story += [callout, Spacer(1, 3 * mm)]
     story.append(paragraph(f"前 {len(top_rows)} 个方案", ParagraphStyle(
         "FlightSection",
         parent=styles["Heading2"],
         fontName=bold_font,
-        fontSize=12,
-        leading=17,
+        fontSize=11.5,
+        leading=16,
         textColor=colors.HexColor("#17324D"),
-        spaceBefore=1 * mm,
-        spaceAfter=2 * mm,
+        spaceBefore=0,
+        spaceAfter=1.5 * mm,
     )))
 
-    headers = ["排名", "去程", "回程", "票价", "航司", "航班", "路线", "机型", "行李"]
+    headers = ["排名", "去程", "回程", "票价 / 口径", "中转", "行李", "退改", "出票方", "航班", "路线", "机型", "备注"]
     table_rows: list[list[Paragraph]] = [
         [paragraph(f"<b>{header}</b>", small_style) for header in headers]
     ]
     for row in top_rows:
+        transfer = "直飞" if row["stops"] == 0 else f"{row['stops']} 次"
         table_rows.append(
             [
                 paragraph(str(row["rank"]), small_style),
                 paragraph(str(row["date"]), small_style),
                 paragraph(str(row["return_date"] or "单程"), small_style),
-                paragraph(f"{row['currency']} {row['price']:,.0f}", small_style),
-                paragraph(str(row["airline"]), small_style),
+                paragraph(f"{row['currency']} {row['price']:,.0f}<br/>{row['price_basis']}", small_style),
+                paragraph(transfer, small_style),
+                paragraph(str(row["baggage"] or "-"), small_style),
+                paragraph(str(row["refund_change"] or "见出票页"), small_style),
+                paragraph(str(row["provider"] or "Trip.com（见详情）"), small_style),
                 paragraph(str(row["outbound_flights"]), small_style),
                 paragraph(str(row["outbound_route"]), small_style),
                 paragraph(str(row["aircraft"] or "-"), small_style),
-                paragraph(str(row["baggage"] or "-"), small_style),
+                paragraph(str(row["notes"] or "-"), small_style),
             ]
         )
 
     table = Table(
         table_rows,
-        colWidths=[8 * mm, 24 * mm, 24 * mm, 18 * mm, 12 * mm, 36 * mm, 24 * mm, 22 * mm, 10 * mm],
+        colWidths=[8 * mm, 20 * mm, 20 * mm, 26 * mm, 9 * mm, 18 * mm, 27 * mm, 29 * mm, 40 * mm, 25 * mm, 23 * mm, 18 * mm],
         repeatRows=1,
         hAlign="LEFT",
     )
@@ -530,19 +595,19 @@ def write_pdf(
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#D8E0E8")),
                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F6F8FA")]),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3.5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3.5),
             ]
         )
     )
     story += [
         table,
-        Spacer(1, 4 * mm),
+        Spacer(1, 3 * mm),
         paragraph(
-            "说明：价格和余票来自查询时点，出票前必须重新核价。"
-            "行李或机型字段没有可靠数据时保持空白，不作推测。",
+            "说明：价格与余票来自查询时点，出票前必须重新核价。"
+            "行李、退改和机型字段没有可靠数据时保持空白或标注“见出票页”，不作推测。",
             small_style,
         ),
         paragraph(
@@ -553,18 +618,22 @@ def write_pdf(
 
     def footer(canvas: Any, doc: Any) -> None:
         canvas.saveState()
-        canvas.setFont(regular_font, 7.5)
+        canvas.setFont(regular_font, 7)
         canvas.setFillColor(colors.HexColor("#7A8794"))
-        canvas.drawCentredString(A4[0] / 2, 9 * mm, f"第 {doc.page} 页 | {title}")
+        canvas.drawCentredString(
+            page_size[0] / 2,
+            8 * mm,
+            f"仅比价、不出票 | {source} | 第 {doc.page} 页",
+        )
         canvas.restoreState()
 
     document = SimpleDocTemplate(
         str(path),
-        pagesize=A4,
-        rightMargin=16 * mm,
-        leftMargin=16 * mm,
-        topMargin=15 * mm,
-        bottomMargin=15 * mm,
+        pagesize=page_size,
+        rightMargin=14 * mm,
+        leftMargin=14 * mm,
+        topMargin=12 * mm,
+        bottomMargin=14 * mm,
         title=title,
         author="Codex",
     )
@@ -578,6 +647,7 @@ def write_docx(
     top: int,
     title: str,
     source: str,
+    source_url: str,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     document = Document()
@@ -603,7 +673,8 @@ def write_docx(
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
     subtitle_run = subtitle.add_run(
         f"{data.get('origin') or ''} -> {data.get('dest') or ''} | "
-        f"{datetime.now().astimezone().strftime('%Y-%m-%d %H:%M')} | {source}"
+        f"{datetime.now().astimezone().strftime('%Y-%m-%d %H:%M')} | "
+        f"{data.get('currency') or 'CNY'} | {source} | {source_url}"
     )
     subtitle_run.font.size = Pt(9)
     subtitle_run.font.color.rgb = RGBColor(0x5B, 0x6B, 0x7A)
@@ -623,6 +694,7 @@ def write_docx(
             f"{row['date']} -> {row['return_date'] or '单程'}，"
             f"{row['airline']} {row['outbound_flights']}"
         ).bold = True
+    document.add_paragraph(f"比价提示：{build_pdf_advice(rows)}", style="List Bullet")
 
     document.add_paragraph()
     table_heading = document.add_paragraph()
@@ -635,13 +707,16 @@ def write_docx(
         ("rank", "排名"),
         ("date", "去程"),
         ("return_date", "回程"),
-        ("price", "票价"),
+        ("price", "票价 / 口径"),
+        ("stops", "中转"),
+        ("baggage", "行李"),
+        ("refund_change", "退改"),
+        ("provider", "出票方"),
         ("airline", "航司"),
         ("outbound_flights", "去程航班"),
         ("outbound_route", "路线"),
         ("return_flights", "返程航班"),
         ("aircraft", "机型"),
-        ("baggage", "行李"),
     ]
     table = document.add_table(rows=1, cols=len(visible_columns))
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -659,7 +734,9 @@ def write_docx(
         for index, (key, _) in enumerate(visible_columns):
             value = row.get(key, "")
             if key == "price":
-                value = f"{row['currency']} {float(value):,.0f}"
+                value = f"{row['currency']} {float(value):,.0f} / {row['price_basis']}"
+            if key == "stops":
+                value = "直飞" if value == 0 else f"{value} 次"
             cells[index].text = str(value or "")
 
     document.add_paragraph()
@@ -670,6 +747,10 @@ def write_docx(
     document.add_paragraph(
         "价格与余票来自查询时点，出票前必须重新核价。"
         "机票 JSON 不含行李或机型时，对应列保持空白，不得推测。",
+        style="List Bullet",
+    )
+    document.add_paragraph(
+        f"数据来源：{source_url}。仅比价、不出票。",
         style="List Bullet",
     )
     document.add_paragraph(
@@ -732,11 +813,11 @@ def main() -> None:
 
     pdf, xlsx, docx = resolve_outputs(args, input_path)
     if pdf:
-        write_pdf(pdf.resolve(), rows, data, args.top, args.title, args.source)
+        write_pdf(pdf.resolve(), rows, data, args.top, args.title, args.source, args.source_url)
     if xlsx:
-        write_xlsx(xlsx.resolve(), rows, data, args.top, args.title, args.source)
+        write_xlsx(xlsx.resolve(), rows, data, args.top, args.title, args.source, args.source_url)
     if docx:
-        write_docx(docx.resolve(), rows, data, args.top, args.title, args.source)
+        write_docx(docx.resolve(), rows, data, args.top, args.title, args.source, args.source_url)
 
     print(
         compact_summary(

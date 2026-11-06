@@ -10,6 +10,27 @@
 - 终端只输出文件路径、行数和最便宜方案
 - 支持多日期、往返、指定日期对、航司和转机筛选
 - 行李和机型字段只在有可靠数据时填写，不推测
+- PDF 增加总价口径、行李、中转、退改、出票方和机型对比
+- 自动提示“最低价不是直飞时，哪一班直飞值得比较”
+- 查询失败时自动重试一次，并可保存截图与短诊断
+
+## 结构
+
+```text
+flight-price/
+├── SKILL.md
+├── agents/openai.yaml
+├── references/schema.md
+├── assets/sample-report.pdf
+└── scripts/
+    ├── run_flight_query.py
+    ├── flight_report.py
+    └── diagnose_trip.py
+examples/
+├── HKG-MXP-sample.json
+└── HKG-MXP-sample.pdf
+tests/test_report.py
+```
 
 ## 安装
 
@@ -51,6 +72,19 @@ python3 "$HOME/.codex/skills/flight-price/scripts/run_flight_query.py" HKG MXP \
 --formats pdf,xlsx,docx
 ```
 
+失败诊断默认写入 `./flight-diagnostics`：
+
+```bash
+python3 "$HOME/.codex/skills/flight-price/scripts/run_flight_query.py" HKG MXP \
+  --rt --stay 8 --from 2027-06-10 --to 2027-07-01 \
+  --diagnostics-dir "./flight-diagnostics"
+```
+
+样例产物：
+
+- [JSON](examples/HKG-MXP-sample.json)
+- [PDF](examples/HKG-MXP-sample.pdf)
+
 ## 依赖
 
 - `flight-price` CLI
@@ -58,5 +92,12 @@ python3 "$HOME/.codex/skills/flight-price/scripts/run_flight_query.py" HKG MXP \
 - `reportlab`
 - `python-docx`
 - `openpyxl`
+- `pypdf`（仅运行测试时需要）
 
 在 Codex 桌面版中，使用 workspace dependencies 提供的 Python 运行脚本。
+
+## 测试
+
+```bash
+python3 tests/test_report.py -v
+```
