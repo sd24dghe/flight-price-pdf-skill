@@ -2,7 +2,7 @@
 
 [中文](README.md) | [English](README.en.md)
 
-本地 Codex skill，可查询任意出发地和目的地的 Trip.com 实时机票，并自动生成 PDF。支持单程、往返、玩几天或住几晚，原始 JSON 只落盘，不打印到终端或对话。
+本地 Codex skill，可查询任意出发地和目的地的 Trip.com 实时机票，并自动生成 PDF。核心设计是"**自动 end，脚本跑**"：Agent 只负责用一条命令启动 `run_flight_pdf.py` 然后立即结束回合，脚本在后台独立跑完整个流程——全窗口扫描 → 超时自动重试一次 → 自动启动总结（去重、比价、生成中文报告）→ Playwright 渲染 PDF，跑完即交付。全程原始 JSON 只落临时目录、用完即弃，对话里最多出现 3 行摘要，最大限度省 tokens。支持单程、往返、玩几天或住几晚。
 
 ## 功能
 
@@ -34,6 +34,8 @@ flight-price/
     ├── flight_report.py
     └── diagnose_trip.py
 examples/
+├── 大湾区-羽田-往返机票-2027年6-7月.json  # 实跑合并数据（含 origin）
+├── 大湾区-羽田-往返机票-2027年6-7月.pdf   # 实跑比价报告
 ├── HKG-MXP-sample.json
 ├── flat-scan-sample.json
 └── HKG-MXP-sample.pdf
@@ -120,7 +122,14 @@ python3 "$HOME/.codex/skills/flight-price/scripts/run_flight_query.py" HKG MXP \
   --diagnostics-dir "./flight-diagnostics"
 ```
 
-样例产物：
+样例产物（真实实跑：HKG/SZX/CAN/MFM 四出发地 → 羽田，2027 年 6–7 月窗口，玩 7 天，UO/NH/CX 比价，720 条去重报价）：
+
+- [JSON](examples/大湾区-羽田-往返机票-2027年6-7月.json) — 合并原始扫描数据（每条含 `origin`，超时定向重试结果已并入）
+- [PDF](examples/大湾区-羽田-往返机票-2027年6-7月.pdf) — 自动总结生成的中文比价报告
+
+> 样例中的价格与库存为查询时点快照，不代表当前可售。
+
+历史脱敏样例（旧版 `flight_report.py` 测试夹具）：
 
 - [JSON](examples/HKG-MXP-sample.json)
 - [PDF](examples/HKG-MXP-sample.pdf)

@@ -2,7 +2,7 @@
 
 [中文](README.md) | [English](README.en.md)
 
-A local Codex skill for querying live Trip.com flight prices for any origin and destination, then generating a PDF automatically. It supports one-way and round-trip searches, trip days or nights, and low-token output.
+A local Codex skill for querying live Trip.com flight prices for any origin and destination, then generating a PDF automatically. The core design is **"auto-end, script runs"**: the agent launches `run_flight_pdf.py` with one command and immediately ends its turn; the script finishes everything on its own — full-window scan → one automatic timeout retry → auto-started summary (dedupe, compare, Chinese report) → PDF rendered by Playwright. Raw JSON only lives in a temp dir and is discarded; the conversation never sees more than 3 summary lines, minimizing token usage. Supports one-way/round-trip, "N days" or "N nights".
 
 ## Features
 
@@ -35,6 +35,8 @@ flight-price/
     ├── flight_report.py
     └── diagnose_trip.py
 examples/
+├── 大湾区-羽田-往返机票-2027年6-7月.json  # live merged data (rows carry `origin`)
+├── 大湾区-羽田-往返机票-2027年6-7月.pdf   # live comparison report
 ├── HKG-MXP-sample.json
 ├── flat-scan-sample.json
 └── HKG-MXP-sample.pdf
@@ -115,8 +117,13 @@ python3 "$HOME/.codex/skills/flight-price/scripts/run_flight_query.py" HKG MXP \
 
 Examples:
 
-- [Sample JSON](examples/HKG-MXP-sample.json)
-- [Sample PDF](examples/HKG-MXP-sample.pdf)
+- Live artifacts (real run: HKG/SZX/CAN/MFM → Haneda, June–July 2027 window, 7-day trips, UO/NH/CX, 720 deduped quotes)
+  - [Merged JSON](examples/大湾区-羽田-往返机票-2027年6-7月.json) (each row carries `origin`; timeout retries folded in)
+  - [Comparison PDF](examples/大湾区-羽田-往返机票-2027年6-7月.pdf)
+  - Prices/availability are a snapshot at query time, not current offers.
+- Legacy sanitized fixtures (tests for `flight_report.py`)
+  - [Sample JSON](examples/HKG-MXP-sample.json)
+  - [Sample PDF](examples/HKG-MXP-sample.pdf)
 
 ## Dependencies
 
