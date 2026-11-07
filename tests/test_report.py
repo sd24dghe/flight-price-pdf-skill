@@ -9,7 +9,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pypdf import PdfReader
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,9 +21,12 @@ sys.path.insert(0, str(SKILL_SCRIPTS))
 
 import flight_report  # noqa: E402
 
+ALL_DEPS = all([flight_report.HAS_PDF, flight_report.HAS_XLSX,
+                flight_report.HAS_DOCX, PdfReader is not None])
+
 
 class FlightReportTest(unittest.TestCase):
-    def test_sample_generates_all_formats(self) -> None:
+    def test_sample_rows_parse(self) -> None:
         sample_path = ROOT / "examples" / "HKG-MXP-sample.json"
         data = json.loads(sample_path.read_text(encoding="utf-8"))
         rows = flight_report.collect_candidates(data)
@@ -29,6 +35,12 @@ class FlightReportTest(unittest.TestCase):
         self.assertEqual(rows[0]["price"], 4160.0)
         self.assertIn("直飞", flight_report.build_pdf_advice(rows))
         self.assertEqual(rows[0]["price_basis"], "含税总价")
+
+    @unittest.skipUnless(ALL_DEPS, "reportlab/openpyxl/python-docx/pypdf not installed")
+    def test_sample_generates_all_formats(self) -> None:
+        sample_path = ROOT / "examples" / "HKG-MXP-sample.json"
+        data = json.loads(sample_path.read_text(encoding="utf-8"))
+        rows = flight_report.collect_candidates(data)
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)

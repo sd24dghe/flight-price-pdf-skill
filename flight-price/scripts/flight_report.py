@@ -9,24 +9,36 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from docx import Document
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import Cm, Pt, RGBColor
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+try:  # optional legacy-report deps; run_flight_pdf.py needs none of these
+    from docx import Document
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Cm, Pt, RGBColor
+    HAS_DOCX = True
+except ImportError:
+    HAS_DOCX = False
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+    HAS_XLSX = True
+except ImportError:
+    HAS_XLSX = False
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    HAS_PDF = True
+except ImportError:
+    HAS_PDF = False
 
 
 COLUMNS = [
@@ -53,11 +65,12 @@ COLUMNS = [
     ("notes", "备注"),
 ]
 
-HEADER_FILL = PatternFill("solid", fgColor="17324D")
-HEADER_FONT = Font(color="FFFFFF", bold=True)
-THIN_GRAY = Side(style="thin", color="D8E0E8")
-ROW_FILLS = [PatternFill("solid", fgColor="F6F8FA"), PatternFill("solid", fgColor="FFFFFF")]
-TOP_FILL = PatternFill("solid", fgColor="EAF3F1")
+if HAS_XLSX:
+    HEADER_FILL = PatternFill("solid", fgColor="17324D")
+    HEADER_FONT = Font(color="FFFFFF", bold=True)
+    THIN_GRAY = Side(style="thin", color="D8E0E8")
+    ROW_FILLS = [PatternFill("solid", fgColor="F6F8FA"), PatternFill("solid", fgColor="FFFFFF")]
+    TOP_FILL = PatternFill("solid", fgColor="EAF3F1")
 _PDF_FONTS: tuple[str, str] | None = None
 
 
@@ -302,6 +315,8 @@ def write_xlsx(
     source_url: str,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if not HAS_XLSX:
+        raise SystemExit("openpyxl missing — use run_flight_pdf.py or pip install openpyxl")
     workbook = Workbook()
     summary = workbook.active
     summary.title = "Summary"
@@ -451,6 +466,8 @@ def write_pdf(
     source_url: str,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if not HAS_PDF:
+        raise SystemExit("reportlab missing — use run_flight_pdf.py (Playwright PDF) or pip install reportlab")
     regular_font, bold_font = register_pdf_fonts()
     styles = getSampleStyleSheet()
     page_size = landscape(A4)
@@ -650,6 +667,8 @@ def write_docx(
     source_url: str,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if not HAS_DOCX:
+        raise SystemExit("python-docx missing — pip install python-docx")
     document = Document()
     section = document.sections[0]
     section.top_margin = Cm(1.6)

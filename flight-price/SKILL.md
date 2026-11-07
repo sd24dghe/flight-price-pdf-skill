@@ -52,9 +52,31 @@ Detailed mapping examples are in [references/request-mapping.md](references/requ
 
 `flight-price` extracts Trip.com's `FlightListSearch` response data. Do not replace it with DOM text scraping for normal queries. Use [diagnose_trip.py](scripts/diagnose_trip.py) only to investigate page/API failures. The diagnostic helper degrades through CSS selectors, text selectors, and regex markers, while saving a screenshot instead of dumping HTML.
 
-## Fast path: query and PDF in one command
+## End-to-end fast path (v0.4, preferred for range/airport comparisons)
 
-Use `scripts/run_flight_query.py` for a complete flight request. It invokes `flight-price`, writes raw JSON to a temporary file, generates a PDF, and prints only the paths and cheapest itinerary.
+Use `scripts/run_flight_pdf.py` when the request spans a date window and/or several origins. One command does everything: scans all origins × dates, **retries `timeout` pairs once internally** (single targeted `--pairs` pass), dedupes rows, builds a Chinese HTML report, renders the **PDF with Playwright Chromium — no `reportlab` needed** — and prints a ≤3-line summary.
+
+```bash
+python3 "$SKILL_DIR/scripts/run_flight_pdf.py" HKG,SZX,CAN,MFM HND \
+  --days 7 --depart 2027-06-20 --to 2027-07-25 \
+  --clamp-return 2027-07-31 --airline UO,NH,CX \
+  --title "大湾区→羽田 2027 夏 往返比价" --output out.pdf
+```
+
+Useful flags: `--stay N` instead of `--days`; `--trip-type oneway`; `--limit 5` rows kept per query; `--concurrency 6`; `--cache` for repeat scans; `--keep-json` writes one merged raw file; `--no-pdf` prints the summary only; `--hint "..."` overrides the conclusion line. Exit codes: `0` ok, `2` bad args, `3` HTML built but no Playwright (PDF skipped), `4` no usable data (tell the user to run `flight-price doctor`).
+
+Internally the script locates the CLI via `PATH`, then `~/.local/bin/flight-price`, then `~/.flight-price-skill/.venv/bin/flight-price` (the installer default is `~/.local/bin`, which is often absent from non-login shells). The PDF renderer likewise falls back from the current interpreter to the `flight-price` venv Python.
+
+### Agent auto-end protocol (required)
+
+1. For scans expected to exceed ~60s, start the command as a **background job** (or `nohup … &`) and **end the turn immediately**. Do not sleep, poll, or narrate progress.
+2. On the completion notice, read **only the tail of the job output** (≤5 lines). The script already retried timeouts, cleaned its temp workdir, and wrote `out.pdf` + `out.html`.
+3. Deliver the PDF path plus the 2–3 summary lines it printed. Do **not** re-scan, do not open the JSON, do not run your own retry loop — retry-once is the script's job.
+4. Only if the script exited `3` (no Playwright) deliver the HTML and suggest `flight-price doctor`; only on exit `4` investigate with `doctor` before rerunning.
+
+### Legacy fast path: single command via run_flight_query.py
+
+Use `scripts/run_flight_query.py` for a complete flight request. It invokes `flight-price`, writes raw JSON to a temporary file, generates a PDF, and prints only the paths and cheapest itinerary. Its DOCX/XLSX/PDF report path imports `reportlab`/`python-docx`/`openpyxl`; if those are missing (common on minimal runtimes), use `run_flight_pdf.py` above instead.
 
 ```bash
 SKILL_DIR="${CODEX_HOME:-$HOME/.codex}/skills/flight-price"
@@ -89,7 +111,7 @@ Apply these rules to every invocation:
 
 1. **Never echo raw data.** Save JSON to a temporary file or cache file. Do not print full JSON, HTML, all `flights[]`, or all `results[].options[]` to the terminal or conversation.
 2. **Pre-truncate all visible output.** Keep every tool result under 500 characters unless the user explicitly requests a larger format. Print only paths, counts, key fields, and the best few itineraries.
-3. **Use one atomic batch pass.** Scan all requested dates and airports in one scripted run. Do not self-loop, repeatedly rescan, or retry successful queries. Retry a specific query once only when its status is `timeout`.
+3. **Use one atomic batch pass.** Scan all requested dates and airports in one scripted run. Do not self-loop, repeatedly rescan, or retry successful queries. Retry a specific query once only when its status is `timeout` — `run_flight_pdf.py` already performs that single retry itself, so the agent must never run an outer retry loop or re-read per-date JSON afterwards.
 4. **Generate files, not console dumps.** Write raw JSON to disk, then let `scripts/run_flight_query.py` or `scripts/flight_report.py` produce PDF, DOCX, or XLSX. Read only its compact summary.
 5. **Never invent missing fields.** The CLI output does not reliably include baggage allowance or aircraft type. Leave those fields blank unless they were extracted from a trustworthy source.
 
@@ -110,7 +132,10 @@ Before invoking the CLI, verify it's installed:
 
 ```bash
 which flight-price && flight-price --version
+ls ~/.local/bin/flight-price 2>/dev/null   # installer default; often missing from non-login PATH
 ```
+
+If `which` fails but `~/.local/bin/flight-price` exists, prefix `export PATH="$HOME/.local/bin:$PATH"` or just use `run_flight_pdf.py`, which resolves the CLI automatically.
 
 If missing, the user must install it. Point them at: https://github.com/daghlny/flight-price-skill (one-line installer in the README).
 

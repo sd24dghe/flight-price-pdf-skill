@@ -7,7 +7,10 @@ A local Codex skill for querying live Trip.com flight prices for any origin and 
 ## Features
 
 - Uses the `flight-price` CLI with headless Chromium through Playwright
-- Generates PDF by default; XLSX and DOCX are optional
+- **v0.4: new `run_flight_pdf.py` end-to-end script** — multi-origin × date-window in one command (scan → one automatic timeout retry → summary → Chinese HTML → PDF via Playwright, **no reportlab needed**, runs on Python 3.9+); prints ≤3 summary lines
+- Agent protocol: launch long scans as a background job and end the turn; the script finishes the PDF on its own with zero raw-JSON round-trips
+- The CLI and the rendering interpreter are auto-resolved via `PATH`, `~/.local/bin`, and `~/.flight-price-skill/.venv`
+- Generates PDF by default; XLSX and DOCX stay optional through `flight_report.py`
 - Keeps raw JSON on disk and prints only a compact summary
 - Accepts any origin/destination, one-way/round-trip, date range, airline, and stop filters
 - Maps "8 days" to 7 nights and keeps "8 nights" as 8 nights
@@ -27,13 +30,17 @@ flight-price/
 │   └── request-mapping.md
 ├── assets/sample-report.pdf
 └── scripts/
+    ├── run_flight_pdf.py     # v0.4 end-to-end: scan + retry + summary + PDF
     ├── run_flight_query.py
     ├── flight_report.py
     └── diagnose_trip.py
 examples/
 ├── HKG-MXP-sample.json
+├── flat-scan-sample.json
 └── HKG-MXP-sample.pdf
-tests/test_report.py
+tests/
+├── test_run_flight_pdf.py
+└── test_report.py
 ```
 
 ## Install
@@ -52,6 +59,17 @@ Or clone the repository and run:
 ```
 
 ## Usage
+
+### v0.4 end-to-end one-liner (multi-airport / date-window comparison, recommended)
+
+```bash
+python3 "$HOME/.codex/skills/flight-price/scripts/run_flight_pdf.py" HKG,SZX,CAN,MFM HND \
+  --days 7 --depart 2027-06-20 --to 2027-07-25 \
+  --clamp-return 2027-07-31 --airline UO,NH,CX \
+  --title "GBA to Haneda summer 2027" --output out.pdf
+```
+
+The script scans the whole window, retries timed-out pairs once, dedupes rows, writes a Chinese HTML report, renders the PDF with Playwright, and prints ≤3 summary lines. Intermediate JSON lives in a temp dir and is discarded (use `--keep-json` to keep a merged raw file). One-way: `--trip-type oneway`; summary without PDF: `--no-pdf`.
 
 Start a new Codex conversation and say:
 
@@ -102,17 +120,15 @@ Examples:
 
 ## Dependencies
 
-- `flight-price` CLI
-- Python 3.11+
-- `reportlab`
-- `python-docx`
-- `openpyxl`
-- `pypdf` (tests only)
+- `flight-price` CLI (installed to `~/.local/bin` by default; the scripts resolve it automatically)
+- `run_flight_pdf.py` (v0.4 end-to-end path): Python 3.9+ only; the PDF is rendered by the Playwright runtime bundled with `flight-price`, **no reportlab / python-docx / openpyxl required**
+- `run_flight_query.py` + `flight_report.py` (legacy path, DOCX/XLSX): Python 3.11+, `reportlab`, `python-docx`, `openpyxl`
+- `pypdf` (full test suite only; affected tests auto-skip when missing)
 
 In Codex desktop, use the Python executable from the workspace dependencies.
 
 ## Test
 
 ```bash
-python3 tests/test_report.py -v
+python3 -m unittest discover -s tests -v   # all offline, no network needed
 ```

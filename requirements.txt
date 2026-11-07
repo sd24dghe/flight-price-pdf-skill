@@ -1,3 +1,5 @@
+# 仅旧路径需要（run_flight_query.py / flight_report.py 的 DOCX/XLSX/PDF）。
+# v0.4 端到端 run_flight_pdf.py 只需要 flight-price CLI 自带的 Playwright，不需要本文件任何依赖。
 openpyxl>=3.1
 pypdf>=5
 python-docx>=1.1

@@ -1,0 +1,93 @@
+{
+ "origin": "HKG",
+ "dest": "HND",
+ "mode": "roundtrip",
+ "currency": "CNY",
+ "date_from": "2027-06-20",
+ "date_to": "2027-06-20",
+ "stay_nights": 6,
+ "results": [
+  {
+   "date": "2027-06-20",
+   "return_date": "2027-06-26",
+   "stay_nights": 6,
+   "status": "ok",
+   "options": [
+    {
+     "price": 2135.0,
+     "currency": "CNY",
+     "direct": true,
+     "airline": "UO",
+     "flight_nos": [
+      "UO622"
+     ],
+     "segments": [
+      {
+       "airline": "UO",
+       "flight_no": "UO622",
+       "depart_airport": "HKG",
+       "depart_terminal": "T2",
+       "depart_time": "2027-06-20 17:35:00",
+       "arrive_airport": "HND",
+       "arrive_terminal": "T3",
+       "arrive_time": "2027-06-20 22:55:00",
+       "duration_min": 260
+      }
+     ],
+     "layovers": [],
+     "journeys": [
+      [
+       "UO622"
+      ]
+     ],
+     "return_flights": [],
+     "return_stops": 0,
+     "return_direct": true,
+     "depart_time": "2027-06-20 17:35:00",
+     "total_duration_min": 320,
+     "date": "2027-06-20",
+     "return_date": "2027-06-26",
+     "stay_nights": 6
+    }
+   ]
+  }
+ ],
+ "flights": [
+  {
+   "price": 2135.0,
+   "currency": "CNY",
+   "direct": true,
+   "airline": "UO",
+   "flight_nos": [
+    "UO622"
+   ],
+   "segments": [
+    {
+     "airline": "UO",
+     "flight_no": "UO622",
+     "depart_airport": "HKG",
+     "depart_terminal": "T2",
+     "depart_time": "2027-06-20 17:35:00",
+     "arrive_airport": "HND",
+     "arrive_terminal": "T3",
+     "arrive_time": "2027-06-20 22:55:00",
+     "duration_min": 260
+    }
+   ],
+   "layovers": [],
+   "journeys": [
+    [
+     "UO622"
+    ]
+   ],
+   "return_flights": [],
+   "return_stops": 0,
+   "return_direct": true,
+   "depart_time": "2027-06-20 17:35:00",
+   "total_duration_min": 320,
+   "date": "2027-06-20",
+   "return_date": "2027-06-26",
+   "stay_nights": 6
+  }
+ ]
+}
